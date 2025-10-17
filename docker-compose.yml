@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: indrive-postgres
+    environment:
+      POSTGRES_USER: indrive
+      POSTGRES_PASSWORD: indrive_pass_2024
+      POSTGRES_DB: indrive_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - indrive-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U indrive"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: indrive-backend
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=indrive_db;Username=indrive;Password=indrive_pass_2024
+      - JwtSettings__Secret=IndRive_Super_Secret_Key_2024_!@#$%^&*()_+
+      - JwtSettings__Issuer=InDriveAPI
+      - JwtSettings__Audience=InDriveClient
+      - JwtSettings__ExpiryMinutes=1440
+      - AiServiceUrl=http://ai-service:5000
+    ports:
+      - "5001:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-service:
+        condition: service_started
+    networks:
+      - indrive-network
+
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: indrive-ai
+    environment:
+      - FLASK_ENV=development
+      - DATABASE_URL=postgresql://indrive:indrive_pass_2024@postgres:5432/indrive_db
+    ports:
+      - "5002:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - indrive-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: indrive-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:5001
+      - NEXT_PUBLIC_WS_URL=ws://localhost:5001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - indrive-network
+
+networks:
+  indrive-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+
